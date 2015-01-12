@@ -1,4 +1,4 @@
-require 'debugger'              # optional, may be helpful
+# require 'debugger'              # optional, may be helpful
 require 'open-uri'              # allows open('http://...') to return body
 require 'cgi'                   # for escaping URIs
 require 'nokogiri'              # XML parser
@@ -20,11 +20,16 @@ class OracleOfBacon
   validate :from_does_not_equal_to
 
   def from_does_not_equal_to
-    # YOUR CODE HERE
+    if @from.eql?(@to)
+      errors.add(:from, 'From cannot be the same as To')
+      errors.add(:to, 'From cannot be the same as To')
+    end
   end
 
   def initialize(api_key='')
-    # your code here
+    @api_key = api_key
+    @from = 'Kevin Bacon'
+    @to = @from
   end
 
   def find_connections
@@ -36,14 +41,16 @@ class OracleOfBacon
       Net::ProtocolError => e
       # convert all of these into a generic OracleOfBacon::NetworkError,
       #  but keep the original error message
-      # your code here
+      raise OracleOfBacon::NetworkError.new(e.message)
     end
-    # your code here: create the OracleOfBacon::Response object
+    OracleOfBacon::Response.new(xml)
   end
 
   def make_uri_from_arguments
     # your code here: set the @uri attribute to properly-escaped URI
     #   constructed from the @from, @to, @api_key arguments
+    @uri = "http://oracleofbacon.org/cgi-bin/xml?p=#{CGI.escape(@api_key)}&a=#{CGI.escape(@from)}&b=#{CGI.escape(@to)}"
+    @uri
   end
       
   class Response
@@ -57,16 +64,53 @@ class OracleOfBacon
     private
 
     def parse_response
-      if ! @doc.xpath('/error').empty?
-        parse_error_response
+      if parse_error_response
       # your code here: 'elsif' clauses to handle other responses
       # for responses not matching the 3 basic types, the Response
-      # object should have type 'unknown' and data 'unknown response'         
+      # object should have type 'unknown' and data 'unknown response'
+      elsif parse_graph_response
+      elsif parse_spellcheck_response
+      else
+        parse_invalid_response
       end
     end
+    def parse_invalid_response
+      @type = :unknown
+      @data = 'unknown response type'
+    end
     def parse_error_response
-      @type = :error
-      @data = 'Unauthorized access'
+      parse_collection_response(:error,'/error','Unauthorized access')
+    end
+    def parse_graph_response
+      parse_collection_response(:graph,
+                                '/link',
+                                lambda{|collection|
+                                        @data = []
+                                        actors = collection.xpath('//actor').map(&:text)
+                                        movies = collection.xpath('//movie').map(&:text)
+                                        @data = actors.zip(movies).flatten.compact
+                                      })
+    end
+    def parse_spellcheck_response
+      parse_collection_response(:spellcheck,
+                                '/spellcheck',
+                                lambda{|collection|
+                                        @data = collection.xpath('//match').map(&:text).flatten.compact
+                                      })
+    end
+    def parse_collection_response(type=:error, xpath='/error',error='Unauthorized access')
+      collection = @doc.xpath(xpath)
+      if collection.empty?
+        false
+      else
+        @type = type
+        if error.is_a?(Proc)
+          error.call(collection.children)
+        else
+          @data = error
+        end
+        true
+      end
     end
   end
 end
